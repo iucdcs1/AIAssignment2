@@ -1,0 +1,544 @@
+# Import necessary libraries
+import random
+from collections import defaultdict
+from copy import copy
+import os
+
+# Set the size of the crossword grid
+SIZE = 20
+
+
+# Define a Gene class to represent a word in the crossword
+class Gene:
+    # Initialize Gene with a word and random orientation
+    def __init__(self, word):
+        self.x = -1
+        self.y = -1
+        self.p = random.choice(['h', 'v'])
+        self.letters = word
+
+    def __str__(self):
+        return self.letters[0]
+
+
+# Define a Chromosome class to represent a crossword solution
+class Chromosome:
+    # Initialize Chromosome with a list of words
+    def __init__(self, wordlist):
+        self.crossword = [[' ' for _ in range(SIZE)] for _ in range(SIZE)]
+        self.genes = [Gene(word) for word in wordlist]
+
+    # Get the index of a Gene in the chromosome by its word
+    def get_Gene(self, word: str) -> int:
+        for gene in self.genes:
+            if gene.letters == word:
+                return self.genes.index(gene)
+
+
+# Define a Graph class to represent a graph of connected genes in a chromosome
+class Graph:
+    # Initialize Graph with a chromosome
+    def __init__(self, chromosome):
+        self.graph = defaultdict(list)
+        self.chromosome = chromosome
+
+    # Add an edge between two genes in the graph
+    def add_edge(self, u, v):
+        self.graph[u].append(v)
+        self.graph[v].append(u)
+
+    # Depth-first search to traverse the graph
+    def is_connected(self):
+        visited = set()
+
+        def dfs(node):
+            visited.add(node)
+            for neighbor in self.graph[node]:
+                if neighbor not in visited:
+                    dfs(neighbor)
+
+        # Start traversal from the first letter of the longest gene
+        the_longest = self.chromosome.genes[0]
+
+        for gene in self.chromosome.genes[1:]:
+            if len(gene.letters) > len(the_longest.letters):
+                the_longest = gene
+
+        start_node = the_longest
+        dfs(start_node)
+
+        # Check if all words are visited and return the size of not visited genes
+        return len(self.chromosome.genes) - len(visited)
+
+
+# Define a CrosswordGen class to generate crosswords using a genetic algorithm
+class CrosswordGen:
+    # Initialize CrosswordGen with parameters for the genetic algorithm
+    def __init__(self, wordlist, n_offsprings, number_of_chromosomes, rate):
+        self.wordlist = wordlist
+        self.number_of_chromosomes = number_of_chromosomes
+        self.mutation_rate = rate
+        self.n_offsprings = n_offsprings
+
+    # Create the initial population of crosswords
+    def create_first_population(self):
+        population = []
+        for n in range(self.number_of_chromosomes):
+            chromosome = Chromosome(self.wordlist)
+            self.place_words_from_solution(chromosome, self.wordlist)
+            population.append(chromosome)
+
+        population.sort(key=lambda x: self.evaluate_fitness(x))
+
+        # for row1 in population[0].crossword:
+        # print('.'.join([str(i) for i in row1]))
+
+        return population
+
+    # Place words from the solution into the crossword grid
+    def place_words_from_solution(self, chromosome: Chromosome, wordlist: [str]):
+        # Implementation of placing words horizontally and vertically in the grid
+        for word in wordlist:
+            if chromosome.genes[chromosome.get_Gene(word)].p == 'h':
+                self.place_word_horizontal(chromosome, word)
+            else:
+                self.place_word_vertical(chromosome, word)
+
+    # Place a word horizontally in the crossword grid
+    @staticmethod
+    def place_word_horizontal(chromosome: Chromosome, word: str):
+        free_pos = []
+        for y in range(SIZE):
+            for x in range(SIZE - len(word) + 1):
+                is_free = True
+                for k in range(len(word)):
+                    if not (chromosome.crossword[y][x + k] == ' ' or chromosome.crossword[y][x + k] == word[k]):
+                        is_free = False
+                        break
+                if is_free:
+                    free_pos.append((y, x))
+
+        if free_pos:
+            y, x = random.choice(free_pos)
+
+            gene_idx = chromosome.get_Gene(word)
+            chromosome.genes[gene_idx].x, chromosome.genes[gene_idx].y = x, y
+
+            for k in range(len(word)):
+                chromosome.crossword[y][x + k] = word[k]
+
+    # Place a word vertically in the crossword grid
+    @staticmethod
+    def place_word_vertical(chromosome: Chromosome, word: str):
+        free_pos = []
+        for y in range(SIZE - len(word) + 1):
+            for x in range(SIZE):
+                is_free = True
+                for k in range(len(word)):
+                    if not (chromosome.crossword[y + k][x] == ' ' or chromosome.crossword[y + k][x] == word[k]):
+                        is_free = False
+                        break
+                if is_free:
+                    free_pos.append((y, x))
+
+        if free_pos:
+            y, x = random.choice(free_pos)
+
+            gene_idx = chromosome.get_Gene(word)
+            chromosome.genes[gene_idx].x, chromosome.genes[gene_idx].y = x, y
+
+            for k in range(len(word)):
+                chromosome.crossword[y + k][x] = word[k]
+
+    # Check if two genes intersect
+    @staticmethod
+    def is_Intersecting(gene1: Gene, gene2: Gene):
+        if gene1.p == 'h' and gene2.p == 'v':
+            if gene1.x <= gene2.x < gene1.x + len(gene1.letters) and \
+                    gene2.y <= gene1.y < gene2.y + len(gene2.letters):
+                return True
+        elif gene1.p == 'v' and gene2.p == 'h':
+            if gene2.x <= gene1.x < gene2.x + len(gene2.letters) and \
+                    gene1.y <= gene2.y < gene1.y + len(gene1.letters):
+                return True
+
+    # Check if the intersection between two genes is correct
+    def is_Correct_Intersection(self, gene1, gene2):
+        wrong = True
+        if self.is_Intersecting(gene1, gene2):
+            wrong = False
+
+            if gene1.p == "h":
+                x = gene2.x
+                y = gene1.y
+
+                letter = gene1.letters[x - gene1.x]
+                if letter != gene2.letters[y - gene2.y]:
+                    wrong = True
+            else:
+                x = gene1.x
+                y = gene2.y
+
+                letter = gene2.letters[x - gene2.x]
+                if letter != gene1.letters[y - gene1.y]:
+                    wrong = True
+        return wrong
+
+    # Evaluate the fitness of a chromosome based on various rules described in report
+    def evaluate_fitness(self, chromosome: Chromosome):
+        fitness = 0
+
+        # Checking rule 4
+        for gene in chromosome.genes:
+            if gene.p == 'h':
+                if gene.x + len(gene.letters) > SIZE:
+                    fitness -= 1 * (gene.x + len(gene.letters) - SIZE)
+                    # print(gene.letters, "is cut")
+
+            else:
+                if gene.y + len(gene.letters) > SIZE:
+                    fitness -= 1 * (gene.x + len(gene.letters) - SIZE)
+                    # print(gene.letters, "is cut")
+
+        # Checking rule 5
+        intersected = set()
+        for i in range(len(chromosome.genes) - 1):
+            gene1 = chromosome.genes[i]
+            for j in range(i + 1, len(chromosome.genes)):
+                gene2 = chromosome.genes[j]
+
+                if gene1.p == 'h' and gene2.p == 'v':
+                    if gene1.x <= gene2.x < gene1.x + len(gene1.letters) and \
+                            gene2.y <= gene1.y < gene2.y + len(gene2.letters):
+                        # print(gene1.letters, gene2.letters)
+                        intersected.add(gene1)
+                        intersected.add(gene2)
+
+                elif gene1.p == 'v' and gene2.p == 'h':
+                    if gene2.x <= gene1.x < gene2.x + len(gene2.letters) and \
+                            gene1.y <= gene2.y < gene1.y + len(gene1.letters):
+                        # print(gene1.letters, gene2.letters)
+                        intersected.add(gene1)
+                        intersected.add(gene2)
+
+        fitness -= 3 * (len(chromosome.genes) - len(intersected))
+
+        # Checking rule 6
+        for i in range(len(chromosome.genes)):
+            gene1 = chromosome.genes[i]
+            for j in range(i + 1, len(chromosome.genes)):
+                gene2 = chromosome.genes[j]
+                if gene1.p == gene2.p:
+                    if gene1.p == 'h':
+
+                        if gene1.y == gene2.y and (gene2.x <= gene1.x <= gene2.x + len(gene2.letters) or
+                                                   gene1.x <= gene2.x <= gene1.x + len(gene1.letters)):
+                            fitness -= 2
+                            # print("Same orientation, intersect", gene1.letters, gene2.letters)
+
+                    elif gene1.p == 'v':
+
+                        if gene1.x == gene2.x and (gene2.y <= gene1.y <= gene2.y + len(gene2.letters) or
+                                                   gene1.y <= gene2.y <= gene1.y + len(gene1.letters)):
+                            fitness -= 2
+                            # print("Same orientation, intersect", gene1.letters, gene2.letters)
+
+        # Checking rule 7
+        for gene1 in chromosome.genes:
+            for gene2 in chromosome.genes:
+                if gene1 != gene2:
+                    if gene1.p == gene2.p == 'h' and gene1.y == gene2.y + 1:
+                        bad_length = 0
+
+                        if gene1.x <= gene2.x <= gene1.x + len(gene1.letters):
+                            if gene2.x + len(gene2.letters) < gene1.x + len(gene1.letters):
+                                bad_length = gene2.x + len(gene2.letters) - gene2.x
+                            else:
+                                bad_length = gene1.x + len(gene1.letters) - gene2.x
+
+                        elif gene2.x <= gene1.x <= gene2.x + len(gene2.letters):
+                            if gene1.x + len(gene1.letters) < gene2.x + len(gene2.letters):
+                                bad_length = gene1.x + len(gene1.letters) - gene1.x
+                            else:
+                                bad_length = (gene2.x + len(gene2.letters) - gene1.x)
+
+                        fitness -= bad_length * 2
+                        # print(gene1.letters, "parallel", gene2.letters, "bad: ", bad_length)
+                    elif gene1.p == gene2.p == 'v' and gene1.x == gene2.x + 1:
+                        bad_length = 0
+
+                        if gene1.y <= gene2.y <= gene1.y + len(gene1.letters):
+                            if gene2.y + len(gene2.letters) < gene1.y + len(gene1.letters):
+                                bad_length = gene2.y + len(gene2.letters) - gene2.y
+                            else:
+                                bad_length = (gene1.y + len(gene1.letters) - gene2.y)
+
+                        elif gene2.y <= gene1.y <= gene2.y + len(gene2.letters):
+                            if gene1.y + len(gene1.letters) < gene2.y + len(gene2.letters):
+                                bad_length = gene1.y + len(gene1.letters) - gene1.y
+                            else:
+                                bad_length = (gene2.y + len(gene2.letters) - gene1.y)
+
+                        fitness -= bad_length * 2
+                        # print(gene1.letters, "parallel", gene2.letters, "bad: ", bad_length)
+
+                    if gene1.p == 'v' and gene2.p == 'h':
+
+                        for y in range(gene1.y, gene1.y + len(gene1.letters)):
+                            if gene2.y == y:
+                                if gene2.x + len(gene2.letters) == gene1.x and \
+                                        self.is_Correct_Intersection(gene1, gene2):
+                                    fitness -= 1
+                                    # print(gene1.letters, "near to (vertical, left-side)", gene2.letters)
+                                    break
+
+                        x = gene1.x
+                        for y in range(gene1.y, gene1.y + len(gene1.letters)):
+                            if gene2.y == y and gene2.x in [x - 1, x + 1] and \
+                                    self.is_Correct_Intersection(gene1, gene2):
+                                fitness -= 1
+                                # print(gene1.letters, "near to (vertical, right-side)", gene2.letters)
+                                break
+
+                    elif gene1.p == 'h' and gene2.p == 'v':
+
+                        for x in range(gene1.x, gene1.x + len(gene1.letters)):
+                            if gene2.x == x:
+                                if gene2.y + len(gene2.letters) == gene1.y and \
+                                        self.is_Correct_Intersection(gene1, gene2):
+                                    fitness -= 1
+                                    # print(gene1.letters, "near to (horizontal, upper)", gene2.letters)
+                                    break
+
+                        y = gene1.y
+                        for x in range(gene1.x, gene1.x + len(gene1.letters)):
+                            if gene2.x == x and gene2.y in [y - 1, y + 1] and \
+                                    self.is_Correct_Intersection(gene1, gene2):
+                                fitness -= 1
+                                # print(gene1.letters, "near to (horizontal, lower)", gene2.letters)
+                                break
+
+        # Checking wrong intersections
+        for gene1 in chromosome.genes:
+            for gene2 in chromosome.genes:
+                if gene1 != gene2 and gene1.p != gene2.p:
+                    wrong = self.is_Correct_Intersection(gene1, gene2)
+                    if self.is_Intersecting(gene1, gene2) and wrong:
+                        # print("Wrong intersection")
+                        fitness -= 1.5
+
+        # Checking if every gene is connected
+        graph = Graph(chromosome)
+        for gene1 in chromosome.genes:
+            for gene2 in chromosome.genes:
+                if not self.is_Correct_Intersection(gene1, gene2) and gene1 != gene2:
+                    graph.add_edge(gene1, gene2)
+                    graph.add_edge(gene2, gene1)
+
+        disconnected_genes = graph.is_connected()
+        if disconnected_genes != 0:
+            fitness -= disconnected_genes * 4
+
+        return fitness
+
+    # Mutate a chromosome by changing gene (or genes) orientations or position
+    def mutate(self, chromosome: Chromosome):
+        mutated_chromosome = Chromosome(self.wordlist)
+        mutated_chromosome.genes = [copy(gene) for gene in chromosome.genes]  # Creating a copy of given chromosome
+
+        for gene_to_mutate in mutated_chromosome.genes:  # Mutating some of genes
+            if random.random() < self.mutation_rate:
+                gene_to_mutate.p = random.choice(['h', 'v'])  # Direction mutation
+                if gene_to_mutate.p == 'h':  # Position mutation (with heuristic to remove out-of-borders situations)
+                    gene_to_mutate.x = random.randint(0, SIZE - (1 + len(gene_to_mutate.letters)))
+                    gene_to_mutate.y = random.randint(0, SIZE - 1)
+                else:
+                    gene_to_mutate.x = random.randint(0, SIZE - 1)
+                    gene_to_mutate.y = random.randint(0, SIZE - (1 + len(gene_to_mutate.letters)))
+
+        return mutated_chromosome
+
+    # Perform uniform crossover between two parent chromosomes
+    def crossover(self, mother: Chromosome, father: Chromosome):
+        child = Chromosome(self.wordlist)
+        for i in range(len(mother.genes)):
+            temp = random.randint(0, 1)  # Uniformly choosing
+            if random.randint(0, 1) == 1:
+                child.genes[i] = copy(mother.genes[i])
+            else:
+                child.genes[i] = copy(father.genes[i])
+
+        return child
+
+    # Select parents for reproduction using tournament selection
+    def select_parents(self, population: [Chromosome]):
+        tournament_size = 6  # Some changes to parameter were made during debugging
+        selected_mothers = []
+        selected_fathers = []
+
+        for _ in range(self.n_offsprings):
+            # Select random individuals for the tournament
+            tournament_mothers = random.sample(population, tournament_size)
+            tournament_fathers = random.sample(population, tournament_size)
+
+            # Choose the fittest individual from the tournament as the mother
+            mother = max(tournament_mothers, key=lambda x: self.evaluate_fitness(x))
+            selected_mothers.append(mother)
+
+            # Choose the fittest individual from the tournament as the father
+            father = max(tournament_fathers, key=lambda x: self.evaluate_fitness(x))
+            selected_fathers.append(father)
+
+        return selected_mothers, selected_fathers
+
+    # Display the crossword grid of a chromosome
+    def display_crossword(self, chromosome):
+        chromosome.crossword = [[' ' for _ in range(SIZE)] for _ in range(SIZE)]
+        for gene1 in chromosome.genes:
+            for i in range(len(gene1.letters)):
+                if gene1.p == 'h':
+                    if gene1.x + i > 19:
+                        chromosome.crossword[gene1.y][gene1.x + i - 20] = gene1.letters[i]
+                    else:
+                        chromosome.crossword[gene1.y][gene1.x + i] = gene1.letters[i]
+                else:
+                    if gene1.y + i > 19:
+                        chromosome.crossword[gene1.y + i - 20][gene1.x] = gene1.letters[i]
+                    else:
+                        chromosome.crossword[gene1.y + i][gene1.x] = gene1.letters[i]
+        for row in chromosome.crossword:
+            print('.'.join(row))
+        print("\n")
+
+    # Replace the old population with the new individuals
+    def replace_population(self, population, new_individuals):
+        combined_population = population + new_individuals
+
+        # Sort the combined population based on fitness
+        combined_population.sort(key=lambda x: self.evaluate_fitness(x))
+
+        # Select the top individuals to form the new population ang make it averagely better
+        new_population = combined_population[-len(population):]
+
+        return new_population
+
+    # Perform one step of the genetic algorithm (selection, crossover, mutation and replacing population)
+    def evolution_step(self, population):
+        mothers, fathers = self.select_parents(population)
+        offsprings = []
+
+        for mother, father in zip(mothers, fathers):
+            offspring = self.crossover(mother, father)
+            offspring = self.mutate(offspring)
+            offsprings.append(offspring)
+
+        new_population = self.replace_population(population, offsprings)
+        return new_population
+
+    # Perform the evolution of the population using genetic algorithm
+    def evolve(self):
+        avg_fitness_change = []  # For debugging and plots
+        max_fitness_change = []  # For debugging and plots
+
+        population = self.create_first_population()  # Creating initial population
+
+        generation = 0  # Counter of generation
+        while True:  # While solution is not found
+            generation += 1
+
+            if generation % 5000 == 0:
+                return avg_fitness_change, max_fitness_change, best_individual
+
+            if generation % 1000 == 0:
+                population = self.create_first_population()
+            # print(f"{(generation / (self.generations * len(self.wordlist)) * 100):.2f}%")
+
+            population = self.evolution_step(population)  # Perform evolution step
+            best_individual = population[-1]  # Get the best individual
+            current_fitness = [self.evaluate_fitness(x) for x in population]  # All fitness
+
+            temporary_avg = sum(current_fitness) / self.number_of_chromosomes  # Avg fitness
+            max_fitness_change.append(current_fitness[0])  # Best fitness change save
+            avg_fitness_change.append(temporary_avg)  # Avg fitness change save
+
+            # print(temporary_avg)
+
+            if current_fitness[0] >= 0:  # if solution is found
+                # print(avg_fitness_change[-1], max_fitness_change[-1])
+                # self.display_crossword(best_individual)
+                return avg_fitness_change[int(len(avg_fitness_change) * 0.95):], \
+                    max_fitness_change[int(len(avg_fitness_change) * 0.95):], \
+                    best_individual
+
+            # if generation % 50 == 0:
+            # print(avg_fitness_change[-1], max_fitness_change[-1])
+            # self.display_crossword(best_individual)
+
+
+# Read input word lists from files
+def read_inputs(k: int) -> [[str]]:
+    result = []
+    txt = [f"inputs/input{i}.txt" for i in range(1, k + 1)]
+
+    for file_name in txt:
+        with open(file_name, "r") as file:
+            input_words = file.read().splitlines()
+            result.append(input_words)
+
+    return result
+
+
+# Get the crossword representation from a chromosome. For debugging and output
+def get_crossword(chromosome, debug=False):
+    chromosome.crossword = [[' ' for _ in range(SIZE)] for _ in range(SIZE)]
+    for gene1 in chromosome.genes:
+        for i in range(len(gene1.letters)):
+            if gene1.p == 'h':
+                if gene1.x + i > 19:
+                    chromosome.crossword[gene1.y][gene1.x + i - 20] = gene1.letters[i]
+                else:
+                    chromosome.crossword[gene1.y][gene1.x + i] = gene1.letters[i]
+            else:
+                if gene1.y + i > 19:
+                    chromosome.crossword[gene1.y + i - 20][gene1.x] = gene1.letters[i]
+                else:
+                    chromosome.crossword[gene1.y + i][gene1.x] = gene1.letters[i]
+
+    txt_result = ''
+
+    if debug:
+        for row in chromosome.crossword:
+            txt_result += '.'.join(row) + '\n'
+    else:
+        for gene in chromosome.genes:
+            txt_result += str(gene.y) + " " + str(gene.x) + " "
+            if gene.p == 'h':
+                txt_result += "0\n"
+            else:
+                txt_result += "1\n"
+
+    return txt_result
+
+
+if not (os.path.isdir("outputs")):  # Creating folder with outputs
+    os.mkdir("outputs")
+
+offsprings_number = 10  # GA parameters
+chromosomes_number = 100
+mutation_rate = 0.20
+
+inputs = read_inputs(int(input()))  # Number of input files
+
+k = 1  # Counter
+
+# Perform finding solution for every input
+for wordlist in inputs:
+    crossword_generator = CrosswordGen(wordlist, offsprings_number, chromosomes_number,
+                                       mutation_rate)  # Initialization
+
+    avg, maximum, resulting_crossword = crossword_generator.evolve()  # Result
+    crossword_generator.display_crossword(resulting_crossword)
+    file_output = open(f"outputs/output{k}.txt", "w")
+    k += 1
+    file_output.write(get_crossword(resulting_crossword))  # Output
+    file_output.close()
